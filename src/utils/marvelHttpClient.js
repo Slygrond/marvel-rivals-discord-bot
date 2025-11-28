@@ -1,22 +1,25 @@
 // src/utils/marvelHttpClient.js
 const https = require("https");
 
-// You can override this in .env if docs say something else.
-// Example: MARVEL_RIVALS_API_BASE=https://api.marvelrivalsapi.com
-const API_BASE =
-  process.env.MARVEL_RIVALS_API_BASE || "https://marvelrivalsapi.com/api/v1";
+// Origin (no /api/v1 here)
+const API_ORIGIN =
+  process.env.MARVEL_RIVALS_API_ORIGIN || "https://marvelrivalsapi.com";
 
-// Use the same key name you already have in .env
-// e.g. MR_API_KEY=xxxxxxxxxxxx
+// Path prefix for the actual API
+const API_PREFIX =
+  process.env.MARVEL_RIVALS_API_PREFIX || "/api/v1";
+
+// Use same key name as your other Marvel API usage
 const API_KEY = process.env.MR_API_KEY;
 
 /**
- * Simple GET helper for MarvelRivalsAPI.
- * path should start with `/`, e.g. `/heroes`
+ * Generic GET helper.
+ * `path` should start with `/`, e.g. `/news`, `/heroes`, `/player/...`
  */
 function get(path) {
   return new Promise((resolve, reject) => {
-    const url = new URL(path, API_BASE);
+    const fullPath = API_PREFIX.replace(/\/$/, "") + path; // "/api/v1" + "/news" = "/api/v1/news"
+    const url = new URL(fullPath, API_ORIGIN); // -> https://marvelrivalsapi.com/api/v1/news
 
     const options = {
       method: "GET",
@@ -25,12 +28,10 @@ function get(path) {
       }
     };
 
-    // If the API expects a key, we send it. Adjust header name if docs say so.
     if (API_KEY) {
-      // Many APIs use either Authorization: Bearer <key>
-      // or x-api-key: <key>. Start with Bearer; change if docs differ.
-      options.headers.Authorization = "Bearer " + API_KEY;
-      // options.headers["x-api-key"] = API_KEY; // alternative if needed
+      // Adjust header name if MarvelRivalsAPI docs say something else
+      options.headers["x-api-key"] = API_KEY;
+      // or: options.headers.Authorization = "Bearer " + API_KEY;
     }
 
     const req = https.request(url, options, (res) => {
@@ -41,7 +42,9 @@ function get(path) {
       });
 
       res.on("end", () => {
-        // Non-2xx HTTP status → log and fail gracefully
+        const snippet = data.slice(0, 200);
+
+        // Non-2xx → log + reject
         if (res.statusCode < 200 || res.statusCode >= 300) {
           console.error(
             "[Marvel API] Non-2xx status",
@@ -49,7 +52,7 @@ function get(path) {
             "for",
             url.toString(),
             "body snippet:",
-            data.slice(0, 200)
+            snippet
           );
           return reject(
             new Error(`HTTP ${res.statusCode} from Marvel Rivals API`)
@@ -64,9 +67,11 @@ function get(path) {
             "[Marvel API] JSON parse error for",
             url.toString(),
             "body snippet:",
-            data.slice(0, 200)
+            snippet
           );
-          reject(new Error("Failed to parse Marvel Rivals API JSON response"));
+          reject(
+            new Error("Failed to parse Marvel Rivals API JSON response")
+          );
         }
       });
     });
@@ -90,9 +95,7 @@ function getHero(query) {
 }
 
 function getHeroLeaderboard(query) {
-  return get(
-    "/heroes/hero/" + encodeURIComponent(query) + "/leaderboard"
-  );
+  return get("/heroes/hero/" + encodeURIComponent(query) + "/leaderboard");
 }
 
 function getNews() {
