@@ -1,58 +1,43 @@
 // src/utils/marvelHttpClient.js
-const https = require("https");
+const https = require("node:https");
 
-// Origin (no /api/v1 here)
-const API_ORIGIN =
-  process.env.MARVEL_RIVALS_API_ORIGIN || "https://marvelrivalsapi.com";
-
-// Path prefix for the actual API
-const API_PREFIX =
-  process.env.MARVEL_RIVALS_API_PREFIX || "/api/v1";
-
-// Use same key name as your other Marvel API usage
+const BASE_URL = "https://marvelrivalsapi.com";
 const API_KEY = process.env.MR_API_KEY;
 
 /**
- * Generic GET helper.
- * `path` should start with `/`, e.g. `/news`, `/heroes`, `/player/...`
+ * Low-level helper: GET JSON from MarvelRivalsAPI.
+ * `path` must start with `/`, for example `/api/v1/patch-notes?page=1&limit=5`
  */
-function get(path) {
+function httpGetJson(path) {
   return new Promise((resolve, reject) => {
-    const fullPath = API_PREFIX.replace(/\/$/, "") + path; // "/api/v1" + "/news" = "/api/v1/news"
-    const url = new URL(fullPath, API_ORIGIN); // -> https://marvelrivalsapi.com/api/v1/news
+    const url = new URL(path, BASE_URL);
 
     const options = {
       method: "GET",
       headers: {
-        Accept: "application/json"
-      }
+        Accept: "application/json",
+      },
     };
 
     if (API_KEY) {
-      // Adjust header name if MarvelRivalsAPI docs say something else
+      // If docs say something else, change header name here
       options.headers["x-api-key"] = API_KEY;
-      // or: options.headers.Authorization = "Bearer " + API_KEY;
     }
 
     const req = https.request(url, options, (res) => {
-      let data = "";
+      let rawData = "";
 
       res.on("data", (chunk) => {
-        data += chunk;
+        rawData += chunk;
       });
 
       res.on("end", () => {
-        const snippet = data.slice(0, 200);
+        const snippet = rawData.slice(0, 200);
 
-        // Non-2xx → log + reject
+        // Non-2xx => log and reject
         if (res.statusCode < 200 || res.statusCode >= 300) {
           console.error(
-            "[Marvel API] Non-2xx status",
-            res.statusCode,
-            "for",
-            url.toString(),
-            "body snippet:",
-            snippet
+            `[Marvel API] Non-2xx status ${res.statusCode} for ${url.toString()} body snippet: ${snippet}`
           );
           return reject(
             new Error(`HTTP ${res.statusCode} from Marvel Rivals API`)
@@ -60,18 +45,13 @@ function get(path) {
         }
 
         try {
-          const json = JSON.parse(data);
+          const json = JSON.parse(rawData);
           resolve(json);
         } catch (err) {
           console.error(
-            "[Marvel API] JSON parse error for",
-            url.toString(),
-            "body snippet:",
-            snippet
+            `[Marvel API] JSON parse error for ${url.toString()} body snippet: ${snippet}`
           );
-          reject(
-            new Error("Failed to parse Marvel Rivals API JSON response")
-          );
+          reject(err);
         }
       });
     });
@@ -85,42 +65,56 @@ function get(path) {
   });
 }
 
-// Convenience helpers used by your commands
-function getHeroes() {
-  return get("/heroes");
-}
-
-function getHero(query) {
-  return get("/heroes/hero/" + encodeURIComponent(query));
-}
-
-function getHeroLeaderboard(query) {
-  return get("/heroes/hero/" + encodeURIComponent(query) + "/leaderboard");
-}
-
-function getPatchNotes(page = 1, limit = 10) {
-  // MarvelRivalsAPI: GET /api/v1/patch-notes
+/**
+ * PATCH NOTES
+ * MarvelRivalsAPI docs: GET /api/v1/patch-notes?page=1&limit=10
+ */
+function getPatchNotes(page = 1, limit = 5) {
   return httpGetJson(`/api/v1/patch-notes?page=${page}&limit=${limit}`);
 }
 
-function getEvents() {
-  return get("/events");
+/**
+ * HEROES (endpoints guessed – adjust paths if docs differ)
+ */
+function getHeroes() {
+  return httpGetJson("/api/v1/heroes");
 }
 
+function getHero(query) {
+  return httpGetJson(`/api/v1/heroes/hero/${encodeURIComponent(query)}`);
+}
+
+function getHeroLeaderboard(query) {
+  return httpGetJson(
+    `/api/v1/heroes/hero/${encodeURIComponent(query)}/leaderboard`
+  );
+}
+
+/**
+ * PLAYER (for future, if commands use it)
+ */
 function getPlayer(username, platform) {
-  let path = "/player/" + encodeURIComponent(username);
+  let path = `/api/v1/player/${encodeURIComponent(username)}`;
   if (platform) {
-    path += "?platform=" + encodeURIComponent(platform);
+    path += `?platform=${encodeURIComponent(platform)}`;
   }
-  return get(path);
+  return httpGetJson(path);
+}
+
+function getMatchesByUid(uid, platform) {
+  let path = `/api/v1/matches/${encodeURIComponent(uid)}`;
+  if (platform) {
+    path += `?platform=${encodeURIComponent(platform)}`;
+  }
+  return httpGetJson(path);
 }
 
 module.exports = {
-  get,
+  httpGetJson,
+  getPatchNotes,
   getHeroes,
   getHero,
   getHeroLeaderboard,
-  getPatchNotes,
-  getEvents,
-  getPlayer
+  getPlayer,
+  getMatchesByUid,
 };
