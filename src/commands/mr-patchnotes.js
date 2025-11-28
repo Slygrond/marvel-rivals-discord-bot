@@ -2,10 +2,22 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const api = require("../utils/marvelHttpClient");
 
+// Small helper to strip any HTML the API might send
+function stripHtml(str = "") {
+  return str.replace(/<[^>]*>/g, "");
+}
+
+// Limit text length for Discord embeds
+function shorten(text, max = 250) {
+  if (!text) return "";
+  if (text.length <= max) return text;
+  return text.slice(0, max - 3) + "...";
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("mr-patchnotes")
-    .setDescription("Show latest Marvel Rivals patch notes.")
+    .setDescription("Show the latest Marvel Rivals patch notes.")
     .addIntegerOption((opt) =>
       opt
         .setName("count")
@@ -15,58 +27,60 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const count = interaction.options.getInteger("count") ?? 3;
+    const count = interaction.options.getInteger("count") || 3;
 
-    await interaction.deferReply({ ephemeral: false });
+    // We want this visible to everyone so no ephemeral here
+    await interaction.deferReply();
 
+    let patches;
     try {
-      // page 1, limit = count
-      const data = await api.getPatchNotes(1, count);
-
-      // API returns { total_patches, formatted_patches: [...] }
-      const patches = Array.isArray(data?.formatted_patches)
-        ? data.formatted_patches
-        : Array.isArray(data)
-        ? data
-        : [];
-
-      if (!patches.length) {
-        await interaction.editReply("No patch notes found right now.");
-        return;
-      }
-
-      const slice = patches.slice(0, count);
-
-      const embed = new EmbedBuilder()
-        .setTitle("📑 Marvel Rivals — Latest Patch Notes")
-        .setColor(0xffaa00)
-        .setTimestamp(new Date());
-
-      slice.forEach((patch, idx) => {
-        const title = patch.patchTitle || patch.title || "Untitled Patch";
-        const date = patch.patchDate || patch.date || "Unknown date";
-        const type = patch.patchType || "Patch Notes";
-        const summary =
-          patch.previewText ||
-          patch.summary ||
-          patch.description ||
-          "No summary provided.";
-
-        embed.addFields({
-          name: `${idx + 1}. ${title} (${date})`,
-          value:
-            `${type}\n` +
-            summary.slice(0, 200) +
-            (summary.length > 200 ? "…" : "")
-        });
-      });
-
-      await interaction.editReply({ embeds: [embed] });
+      // Get a bunch, then we’ll sort and slice
+      patches = await api.getPatchNotes(1, 25); // page 1, limit 25
     } catch (err) {
       console.error("mr-patchnotes error:", err);
       await interaction.editReply(
         "❌ Could not fetch patch notes from MarvelRivalsAPI right now."
       );
+      return;
     }
+
+    if (!Array.isArray(patches) || patches.length === 0) {
+      await interaction.editReply("No patch notes were returned by the API.");
+      return;
+    }
+
+    // Sort by date (newest first) – if patchDate is missing we push them to the end
+    patches.sort((a, b) => {
+      const da = a.patchDate ? new Date(a.patchDate) : 0;
+      const db = b.patchDate ? new Date(b.patchDate) : 0;
+      return db - da;
+    });
+
+    const slice = patches.slice(0, count);
+
+    const embed = new EmbedBuilder()
+      .setTitle("📄 Marvel Rivals — Latest Patch Notes")
+      .setColor(0xffaa00)
+      .setTimestamp(new Date());
+
+    slice.forEach((p, index) => {
+      const title = p.patchTitle || `Patch ${index + 1}`;
+      const datePart = p.patchDate ? ` (${p.patchDate})` : "";
+      const type = p.patchType || "Patch Notes";
+
+      const rawSummary =
+        p.previewText ||
+        p.fullContent ||
+        "No summary provided by the API.";
+
+      const summary = shorten(stripHtml(rawSummary), 250);
+
+      embed.addFields({
+        name: `${index + 1}. ${title}${datePart}`,
+        value: `${type}\n${summary}`
+      });
+    });
+
+    await interaction.editReply({ embeds: [embed] });
   }
 };
