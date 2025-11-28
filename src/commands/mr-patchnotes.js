@@ -2,7 +2,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const https = require("https");
 
-// very small helper to GET JSON over HTTPS
+// Small helper to GET JSON over HTTPS
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
     https
@@ -56,24 +56,41 @@ module.exports = {
       return;
     }
 
-    // Expect shape: { total_patches: number, formatted_patches: [...] }
-    const patches = Array.isArray(apiData?.formatted_patches)
-      ? apiData.formatted_patches
-      : Array.isArray(apiData)
-      ? apiData
-      : [];
+    // Log a summary of what we actually got (for debugging in pm2 logs)
+    try {
+      console.log("[mr-patchnotes] top-level keys:", Object.keys(apiData || {}));
+    } catch (_) {}
+
+    // Try several possible shapes to find an array of patches
+    const candidates = [
+      apiData?.formatted_patches,
+      apiData?.patch_notes,
+      apiData?.patches,
+      apiData?.data?.formatted_patches,
+      apiData?.data?.patch_notes,
+      apiData?.data?.patches,
+      apiData, // in case it's already an array at root
+    ];
+
+    let patches = [];
+    for (const c of candidates) {
+      if (Array.isArray(c) && c.length > 0) {
+        patches = c;
+        break;
+      }
+    }
 
     if (!patches.length) {
-      console.warn("mr-patchnotes: no patches in API response:", apiData);
+      console.warn("[mr-patchnotes] no patches array found in API response:", apiData);
       await interaction.editReply("No patch notes were returned by the API.");
       return;
     }
 
-    // Sort newest first using patchDate (YYYY-MM-DD)
+    // Sort newest first using patchDate (YYYY-MM-DD if present)
     patches.sort((a, b) => {
       const da = a.patchDate ? Date.parse(a.patchDate) : 0;
       const db = b.patchDate ? Date.parse(b.patchDate) : 0;
-      return db - da; // newer date first
+      return db - da;
     });
 
     const slice = patches.slice(0, count);
@@ -84,9 +101,11 @@ module.exports = {
       .setTimestamp(new Date());
 
     slice.forEach((item, index) => {
-      const title = item.patchTitle || "Untitled Patch";
-      const date = item.patchDate || "Unknown date";
-      const type = item.patchType || "Patch Notes";
+      const title =
+        item.patchTitle || item.title || item.name || "Untitled Patch";
+      const date =
+        item.patchDate || item.date || item.released_at || "Unknown date";
+      const type = item.patchType || item.type || "Patch Notes";
 
       const summarySource =
         item.previewText ||
