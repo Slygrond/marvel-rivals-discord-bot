@@ -2,21 +2,25 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const https = require("node:https");
 
-// Read API key from .env
-const API_KEY = process.env.MR_API_KEY;
-
-if (!API_KEY) {
-  console.error(
-    "[mr-matches] MR_API_KEY is not set in environment variables (.env). " +
-      "Requests to MarvelRivalsAPI will fail."
-  );
-}
+// Support both names just in case
+const API_KEY =
+  process.env.MR_API_KEY ||
+  process.env.MARVEL_RIVALS_API_KEY ||
+  process.env.MARVEL_RIVALS_APIKEY || // extra safety
+  null;
 
 /**
  * Call MarvelRivalsAPI: Player match history v2
  * GET /api/v2/player/{query}/match-history
  */
 function fetchMatchHistory(player, limit = 5) {
+  if (!API_KEY) {
+    // Don't even try to hit the API without a key
+    throw new Error(
+      "Marvel Rivals API key is missing. Set MR_API_KEY in your .env file."
+    );
+  }
+
   const encodedPlayer = encodeURIComponent(player);
 
   const options = {
@@ -41,7 +45,10 @@ function fetchMatchHistory(player, limit = 5) {
         if (res.statusCode < 200 || res.statusCode >= 300) {
           return reject(
             new Error(
-              `HTTP ${res.statusCode} from MarvelRivalsAPI: ${body.slice(0, 200)}`
+              `HTTP ${res.statusCode} from MarvelRivalsAPI: ${body.slice(
+                0,
+                200
+              )}`
             )
           );
         }
@@ -49,13 +56,11 @@ function fetchMatchHistory(player, limit = 5) {
         try {
           const json = JSON.parse(body);
 
-          // If API sends an error object, treat it as failure
-          if (json && json.error) {
-            return reject(
-              new Error(
-                `MarvelRivalsAPI error: ${json.message || "Unknown error"}`
-              )
-            );
+          // tiny debug log – just for you
+          if (Array.isArray(json.match_history) && json.match_history[0]) {
+            const mp = json.match_history[0].match_player || {};
+            console.log("[mr-matches] sample match keys:", Object.keys(json.match_history[0]));
+            console.log("[mr-matches] sample match_player keys:", Object.keys(mp));
           }
 
           resolve(json);
@@ -122,17 +127,43 @@ module.exports = {
     matches.forEach((m, idx) => {
       const mp = m.match_player || {};
 
-      const hero = mp.hero_name || "Unknown hero";
+      // Try multiple possible field names for hero
+      const hero =
+        mp.hero_name ||
+        mp.hero ||
+        mp.heroId ||
+        mp.hero_id ||
+        "Unknown hero";
+
       const kills = mp.kills ?? 0;
       const deaths = mp.deaths ?? 0;
       const assists = mp.assists ?? 0;
 
-      const mapId = m.map_name || m.match_map_id || "Unknown map";
-      const duration = m.match_play_duration || "Unknown duration";
-      const season = m.match_season || "Unknown season";
+      // Map info – show name if API ever adds it, otherwise ID
+      const map =
+        m.map_name ||
+        m.map ||
+        m.map_full_name ||
+        m.match_map_id ||
+        "Unknown map";
 
-      const playerSide = mp.player_side;
-      const winningSide = m.match_winner_side;
+      const season = m.match_season || m.season || "Unknown season";
+
+      // Duration: the API example shows "match_play_duration": "8m 59s"
+      const duration =
+        m.match_play_duration ||
+        m.duration ||
+        (m.match_duration ? `${m.match_duration}s` : "Unknown duration");
+
+      // Result (win/loss), try several possible field names for player team
+      const playerSide =
+        mp.player_side ??
+        mp.player_team ??
+        mp.team_id ??
+        mp.side ??
+        null;
+      const winningSide = m.match_winner_side ?? m.winner_side ?? null;
+
       let result = "Unknown result";
       if (typeof playerSide === "number" && typeof winningSide === "number") {
         result = winningSide === playerSide ? "WIN" : "LOSS";
@@ -148,7 +179,7 @@ module.exports = {
       embed.addFields({
         name: `${idx + 1}. ${result} as ${hero}`,
         value:
-          `Map: ${mapId} | Season: ${season}\n` +
+          `Map: ${map} | Season: ${season}\n` +
           `K/D/A: ${kills}/${deaths}/${assists}\n` +
           `Duration: ${duration} | Time (UTC): ${time}`,
       });
