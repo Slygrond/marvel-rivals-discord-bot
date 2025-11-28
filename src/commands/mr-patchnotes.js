@@ -2,12 +2,12 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const api = require("../utils/marvelHttpClient");
 
-// Small helper to strip any HTML the API might send
+// Helper: strip HTML tags
 function stripHtml(str = "") {
   return str.replace(/<[^>]*>/g, "");
 }
 
-// Limit text length for Discord embeds
+// Helper: shorten long text for embeds
 function shorten(text, max = 250) {
   if (!text) return "";
   if (text.length <= max) return text;
@@ -29,27 +29,45 @@ module.exports = {
   async execute(interaction) {
     const count = interaction.options.getInteger("count") || 3;
 
-    // We want this visible to everyone so no ephemeral here
+    // Visible to everyone
     await interaction.deferReply();
 
-    let patches;
+    let raw;
     try {
-      // Get a bunch, then we’ll sort and slice
-      patches = await api.getPatchNotes(1, 25); // page 1, limit 25
+      // Ask for plenty, we'll sort and slice
+      raw = await api.getPatchNotes(1, 25);
+      console.log("mr-patchnotes raw response type:", typeof raw);
     } catch (err) {
-      console.error("mr-patchnotes error:", err);
+      console.error("mr-patchnotes API error:", err);
       await interaction.editReply(
         "❌ Could not fetch patch notes from MarvelRivalsAPI right now."
       );
       return;
     }
 
-    if (!Array.isArray(patches) || patches.length === 0) {
+    // Accept both:
+    //  - an array: [ {...}, {...} ]
+    //  - an object: { formatted_patches: [ {...}, {...} ], total_patches: N }
+    let patches;
+    if (Array.isArray(raw)) {
+      patches = raw;
+    } else if (raw && Array.isArray(raw.formatted_patches)) {
+      patches = raw.formatted_patches;
+    } else {
+      patches = [];
+    }
+
+    console.log(
+      "mr-patchnotes parsed patches length:",
+      patches ? patches.length : 0
+    );
+
+    if (!patches || patches.length === 0) {
       await interaction.editReply("No patch notes were returned by the API.");
       return;
     }
 
-    // Sort by date (newest first) – if patchDate is missing we push them to the end
+    // Sort by date (newest first). If no date, push to end.
     patches.sort((a, b) => {
       const da = a.patchDate ? new Date(a.patchDate) : 0;
       const db = b.patchDate ? new Date(b.patchDate) : 0;
