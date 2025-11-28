@@ -19,27 +19,37 @@ module.exports = {
 
     await interaction.deferReply({ ephemeral: false });
 
-    let patches;
+    let data;
     try {
-      patches = await api.getPatchNotes();
+      // This returns an object like:
+      // { total_patches: 50, formatted_patches: [ ... ] }
+      data = await api.getPatchNotes();
     } catch (err) {
-      console.error("mr-patchnotes error:", err);
+      console.error("mr-patchnotes error (request failed):", err);
       await interaction.editReply(
         "❌ Could not fetch patch notes from MarvelRivalsAPI right now."
       );
       return;
     }
 
-    if (!Array.isArray(patches) || patches.length === 0) {
+    // Safely extract the array of patches
+    const patches = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.formatted_patches)
+      ? data.formatted_patches
+      : [];
+
+    if (!patches.length) {
+      console.warn("mr-patchnotes: no patches in API response:", data);
       await interaction.editReply("No patch notes were returned by the API.");
       return;
     }
 
     // ✅ Sort by date: newest first
     patches.sort((a, b) => {
-      const da = a.patchDate ? new Date(a.patchDate).getTime() : 0;
-      const db = b.patchDate ? new Date(b.patchDate).getTime() : 0;
-      return db - da; // bigger (newer) date first
+      const da = a.patchDate ? Date.parse(a.patchDate) : 0;
+      const db = b.patchDate ? Date.parse(b.patchDate) : 0;
+      return db - da; // newer date first
     });
 
     const slice = patches.slice(0, count);
