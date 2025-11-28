@@ -1,0 +1,17 @@
+{
+  "name": "marvel-rivals-discord-bot",
+  "version": "1.0.0",
+  "description": "Discord bot for 0-ONE Marvel Rivals tournament team",
+  "main": "src/bot.js",
+  "scripts": {
+    "start": "node src/bot.js",
+    "deploy-commands": "node deploy-commands.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.25.1",
+    "dotenv": "^17.2.3",
+    "marvelrivalsapi": "^1.0.1"
+  }
+}
