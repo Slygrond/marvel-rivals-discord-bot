@@ -2,22 +2,20 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const https = require("node:https");
 
-// Support both names just in case
-const API_KEY =
-  process.env.MR_API_KEY ||
-  process.env.MARVEL_RIVALS_API_KEY ||
-  process.env.MARVEL_RIVALS_APIKEY || // extra safety
-  null;
-
 /**
  * Call MarvelRivalsAPI: Player match history v2
  * GET /api/v2/player/{query}/match-history
  */
 function fetchMatchHistory(player, limit = 5) {
-  if (!API_KEY) {
-    // Don't even try to hit the API without a key
+  // Read API key fresh each time, and support multiple env var names
+  const apiKey =
+    process.env.MR_API_KEY ||
+    process.env.MARVEL_RIVALS_API_KEY ||
+    process.env.MARVEL_RIVALS_APIKEY;
+
+  if (!apiKey) {
     throw new Error(
-      "Marvel Rivals API key is missing. Set MR_API_KEY in your .env file."
+      "Marvel Rivals API key is missing. Set MR_API_KEY (or MARVEL_RIVALS_API_KEY) in your .env file."
     );
   }
 
@@ -29,7 +27,7 @@ function fetchMatchHistory(player, limit = 5) {
     method: "GET",
     headers: {
       Accept: "application/json",
-      "x-api-key": API_KEY,
+      "x-api-key": apiKey,
     },
   };
 
@@ -56,7 +54,7 @@ function fetchMatchHistory(player, limit = 5) {
         try {
           const json = JSON.parse(body);
 
-          // tiny debug log – just for you
+          // Debug once in a while if you like:
           if (Array.isArray(json.match_history) && json.match_history[0]) {
             const mp = json.match_history[0].match_player || {};
             console.log("[mr-matches] sample match keys:", Object.keys(json.match_history[0]));
@@ -127,19 +125,20 @@ module.exports = {
     matches.forEach((m, idx) => {
       const mp = m.match_player || {};
 
-      // Try multiple possible field names for hero
+      // Hero: use player_hero (from the logs), fall back to others if needed
       const hero =
+        (typeof mp.player_hero === "object" && mp.player_hero !== null
+          ? mp.player_hero.hero_name || mp.player_hero.name
+          : mp.player_hero) ||
         mp.hero_name ||
         mp.hero ||
-        mp.heroId ||
-        mp.hero_id ||
         "Unknown hero";
 
       const kills = mp.kills ?? 0;
       const deaths = mp.deaths ?? 0;
       const assists = mp.assists ?? 0;
 
-      // Map info – show name if API ever adds it, otherwise ID
+      // Map: we only have match_map_id right now, so show that
       const map =
         m.map_name ||
         m.map ||
@@ -149,24 +148,26 @@ module.exports = {
 
       const season = m.match_season || m.season || "Unknown season";
 
-      // Duration: the API example shows "match_play_duration": "8m 59s"
-      const duration =
-        m.match_play_duration ||
-        m.duration ||
-        (m.match_duration ? `${m.match_duration}s` : "Unknown duration");
+      // Duration: convert seconds → Xm Ys if numeric
+      let duration;
+      const rawDur = m.match_play_duration;
+      if (typeof rawDur === "number") {
+        const totalSeconds = Math.round(rawDur);
+        const mins = Math.floor(totalSeconds / 60);
+        const secs = totalSeconds % 60;
+        duration = `${mins}m ${secs}s`;
+      } else if (typeof rawDur === "string" && rawDur.trim() !== "") {
+        duration = rawDur;
+      } else {
+        duration = "Unknown duration";
+      }
 
-      // Result (win/loss), try several possible field names for player team
-      const playerSide =
-        mp.player_side ??
-        mp.player_team ??
-        mp.team_id ??
-        mp.side ??
-        null;
-      const winningSide = m.match_winner_side ?? m.winner_side ?? null;
-
+      // Result: is_win is in match_player
       let result = "Unknown result";
-      if (typeof playerSide === "number" && typeof winningSide === "number") {
-        result = winningSide === playerSide ? "WIN" : "LOSS";
+      if (typeof mp.is_win === "boolean") {
+        result = mp.is_win ? "WIN" : "LOSS";
+      } else if (mp.is_win === 1 || mp.is_win === 0) {
+        result = mp.is_win === 1 ? "WIN" : "LOSS";
       }
 
       const time =
