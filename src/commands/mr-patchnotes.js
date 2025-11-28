@@ -1,6 +1,30 @@
 // src/commands/mr-patchnotes.js
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
-const api = require("../utils/marvelHttpClient");
+const https = require("https");
+
+// very small helper to GET JSON over HTTPS
+function fetchJson(url) {
+  return new Promise((resolve, reject) => {
+    https
+      .get(url, (res) => {
+        let data = "";
+
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+
+        res.on("end", () => {
+          try {
+            const json = JSON.parse(data);
+            resolve(json);
+          } catch (err) {
+            reject(err);
+          }
+        });
+      })
+      .on("error", (err) => reject(err));
+  });
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -19,11 +43,11 @@ module.exports = {
 
     await interaction.deferReply({ ephemeral: false });
 
-    let data;
+    let apiData;
     try {
-      // This returns an object like:
-      // { total_patches: 50, formatted_patches: [ ... ] }
-      data = await api.getPatchNotes();
+      apiData = await fetchJson(
+        "https://marvelrivalsapi.com/api/v1/patch-notes?page=1&limit=20"
+      );
     } catch (err) {
       console.error("mr-patchnotes error (request failed):", err);
       await interaction.editReply(
@@ -32,20 +56,20 @@ module.exports = {
       return;
     }
 
-    // Safely extract the array of patches
-    const patches = Array.isArray(data)
-      ? data
-      : Array.isArray(data?.formatted_patches)
-      ? data.formatted_patches
+    // Expect shape: { total_patches: number, formatted_patches: [...] }
+    const patches = Array.isArray(apiData?.formatted_patches)
+      ? apiData.formatted_patches
+      : Array.isArray(apiData)
+      ? apiData
       : [];
 
     if (!patches.length) {
-      console.warn("mr-patchnotes: no patches in API response:", data);
+      console.warn("mr-patchnotes: no patches in API response:", apiData);
       await interaction.editReply("No patch notes were returned by the API.");
       return;
     }
 
-    // ✅ Sort by date: newest first
+    // Sort newest first using patchDate (YYYY-MM-DD)
     patches.sort((a, b) => {
       const da = a.patchDate ? Date.parse(a.patchDate) : 0;
       const db = b.patchDate ? Date.parse(b.patchDate) : 0;
@@ -63,12 +87,18 @@ module.exports = {
       const title = item.patchTitle || "Untitled Patch";
       const date = item.patchDate || "Unknown date";
       const type = item.patchType || "Patch Notes";
-      const summary =
+
+      const summarySource =
         item.previewText ||
         item.shortDescription ||
         item.short_description ||
         item.description ||
-        "No summary provided.";
+        "";
+
+      const summary =
+        summarySource && summarySource.trim().length > 0
+          ? summarySource
+          : "No summary provided.";
 
       embed.addFields({
         name: `${index + 1}. ${title} (${date})`,
