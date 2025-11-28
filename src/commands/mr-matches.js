@@ -2,33 +2,30 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const https = require("node:https");
 
+const API_KEY =
+  process.env.MARVEL_RIVALS_API_KEY || process.env.MR_API_KEY || "";
+
 /**
  * Call MarvelRivalsAPI: Player match history v2
  * GET /api/v2/player/{query}/match-history
  */
 function fetchMatchHistory(player, limit = 5) {
-  // Read API key fresh each time, and support multiple env var names
-  const apiKey =
-    process.env.MR_API_KEY ||
-    process.env.MARVEL_RIVALS_API_KEY ||
-    process.env.MARVEL_RIVALS_APIKEY;
-
-  if (!apiKey) {
-    throw new Error(
-      "Marvel Rivals API key is missing. Set MR_API_KEY (or MARVEL_RIVALS_API_KEY) in your .env file."
-    );
-  }
-
   const encodedPlayer = encodeURIComponent(player);
+
+  const headers = {
+    Accept: "application/json",
+  };
+
+  // Only send header if we actually have a key (avoids the ERR_HTTP_INVALID_HEADER_VALUE)
+  if (API_KEY) {
+    headers["x-api-key"] = API_KEY;
+  }
 
   const options = {
     hostname: "marvelrivalsapi.com",
     path: `/api/v2/player/${encodedPlayer}/match-history?limit=${limit}`,
     method: "GET",
-    headers: {
-      Accept: "application/json",
-      "x-api-key": apiKey,
-    },
+    headers,
   };
 
   return new Promise((resolve, reject) => {
@@ -53,14 +50,6 @@ function fetchMatchHistory(player, limit = 5) {
 
         try {
           const json = JSON.parse(body);
-
-          // Debug once in a while if you like:
-          if (Array.isArray(json.match_history) && json.match_history[0]) {
-            const mp = json.match_history[0].match_player || {};
-            console.log("[mr-matches] sample match keys:", Object.keys(json.match_history[0]));
-            console.log("[mr-matches] sample match_player keys:", Object.keys(mp));
-          }
-
           resolve(json);
         } catch (err) {
           reject(err);
@@ -125,50 +114,43 @@ module.exports = {
     matches.forEach((m, idx) => {
       const mp = m.match_player || {};
 
-      // Hero: use player_hero (from the logs), fall back to others if needed
-      const hero =
-        (typeof mp.player_hero === "object" && mp.player_hero !== null
-          ? mp.player_hero.hero_name || mp.player_hero.name
-          : mp.player_hero) ||
-        mp.hero_name ||
-        mp.hero ||
+      // ---- HERO NAME ----
+      const heroObj = mp.player_hero || {};
+      const heroName =
+        heroObj.hero_name_english ||
+        heroObj.hero_name ||
+        heroObj.hero_id ||
         "Unknown hero";
 
+      // ---- RESULT (WIN / LOSS) ----
+      const isWin = mp.is_win;
+      let result = "Unknown result";
+
+      if (typeof isWin === "boolean") {
+        result = isWin ? "Win" : "Loss";
+      } else if (typeof isWin === "number") {
+        // some APIs use 1 / 0
+        if (isWin === 1) result = "Win";
+        else if (isWin === 0) result = "Loss";
+      } else if (typeof isWin === "string") {
+        const lower = isWin.toLowerCase();
+        if (["1", "true", "win"].includes(lower)) result = "Win";
+        else if (["0", "false", "loss"].includes(lower)) result = "Loss";
+      }
+
+      // ---- BASIC STATS ----
       const kills = mp.kills ?? 0;
       const deaths = mp.deaths ?? 0;
       const assists = mp.assists ?? 0;
 
-      // Map: we only have match_map_id right now, so show that
-      const map =
-        m.map_name ||
-        m.map ||
-        m.map_full_name ||
-        m.match_map_id ||
-        "Unknown map";
+      const mapId = m.map_name || m.match_map_id || "Unknown map";
+      const season = m.match_season ?? "Unknown season";
 
-      const season = m.match_season || m.season || "Unknown season";
-
-      // Duration: convert seconds → Xm Ys if numeric
-      let duration;
-      const rawDur = m.match_play_duration;
-      if (typeof rawDur === "number") {
-        const totalSeconds = Math.round(rawDur);
-        const mins = Math.floor(totalSeconds / 60);
-        const secs = totalSeconds % 60;
-        duration = `${mins}m ${secs}s`;
-      } else if (typeof rawDur === "string" && rawDur.trim() !== "") {
-        duration = rawDur;
-      } else {
-        duration = "Unknown duration";
-      }
-
-      // Result: is_win is in match_player
-      let result = "Unknown result";
-      if (typeof mp.is_win === "boolean") {
-        result = mp.is_win ? "WIN" : "LOSS";
-      } else if (mp.is_win === 1 || mp.is_win === 0) {
-        result = mp.is_win === 1 ? "WIN" : "LOSS";
-      }
+      // duration is in seconds (from docs / sample)
+      const durationSeconds = Number(m.match_play_duration ?? 0);
+      const minutes = Math.floor(durationSeconds / 60);
+      const seconds = Math.round(durationSeconds % 60);
+      const durationText = `${minutes}m ${seconds}s`;
 
       const time =
         m.match_time_stamp != null
@@ -178,11 +160,11 @@ module.exports = {
           : "Unknown time";
 
       embed.addFields({
-        name: `${idx + 1}. ${result} as ${hero}`,
+        name: `${idx + 1}. ${result} as ${heroName}`,
         value:
-          `Map: ${map} | Season: ${season}\n` +
+          `Map: ${mapId} | Season: ${season}\n` +
           `K/D/A: ${kills}/${deaths}/${assists}\n` +
-          `Duration: ${duration} | Time (UTC): ${time}`,
+          `Duration: ${durationText} | Time (UTC): ${time}`,
       });
     });
 
