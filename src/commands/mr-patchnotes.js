@@ -67,11 +67,18 @@ module.exports = {
       return;
     }
 
-    // Sort by date (newest first). If no date, push to end.
+        // Sort by date (newest first). If no date, push to end.
     patches.sort((a, b) => {
       const da = a.patchDate ? new Date(a.patchDate) : 0;
       const db = b.patchDate ? new Date(b.patchDate) : 0;
-      return db - da;
+
+      // if either date is missing, keep the one with a date before the one without
+      if (!da && !db) return 0;
+      if (!da) return 1;   // a has no date -> after b
+      if (!db) return -1;  // b has no date -> after a
+
+      // newest first
+      return da - db; // invert to get latest patches at the top
     });
 
     const slice = patches.slice(0, count);
