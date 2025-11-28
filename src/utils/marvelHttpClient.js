@@ -98,8 +98,9 @@ function getHeroLeaderboard(query) {
   return get("/heroes/hero/" + encodeURIComponent(query) + "/leaderboard");
 }
 
-function getNews() {
-  return get("/news");
+function getPatchNotes(page = 1, limit = 10) {
+  // MarvelRivalsAPI: GET /api/v1/patch-notes
+  return httpGetJson(`/api/v1/patch-notes?page=${page}&limit=${limit}`);
 }
 
 function getEvents() {
@@ -119,7 +120,7 @@ module.exports = {
   getHeroes,
   getHero,
   getHeroLeaderboard,
-  getNews,
+  getPatchNotes,
   getEvents,
   getPlayer
 };
