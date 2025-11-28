@@ -1,12 +1,7 @@
 require("dotenv").config();
 const fs = require("node:fs");
 const path = require("node:path");
-const {
-  Client,
-  Collection,
-  GatewayIntentBits,
-  Events
-} = require("discord.js");
+const { Client, GatewayIntentBits, Collection, ActivityType, Events } = require("discord.js");
 
 const client = new Client({
   intents: [
@@ -36,6 +31,18 @@ for (const file of commandFiles) {
 
 client.once(Events.ClientReady, (c) => {
   console.log(`✅ Logged in as ${c.user.tag}`);
+
+  // Set status: Playing with 0-ONE
+  c.user.setPresence({
+    activities: [
+      {
+        // Discord will show this as "Playing with 0-ONE"
+        name: "with 0-ONE",
+        type: ActivityType.Playing
+      }
+    ],
+    status: "online"
+  });
 });
 
 // Handle slash commands
