@@ -2,6 +2,16 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const https = require("node:https");
 
+// Read API key from .env
+const API_KEY = process.env.MR_API_KEY;
+
+if (!API_KEY) {
+  console.error(
+    "[mr-matches] MR_API_KEY is not set in environment variables (.env). " +
+      "Requests to MarvelRivalsAPI will fail."
+  );
+}
+
 /**
  * Call MarvelRivalsAPI: Player match history v2
  * GET /api/v2/player/{query}/match-history
@@ -15,7 +25,7 @@ function fetchMatchHistory(player, limit = 5) {
     method: "GET",
     headers: {
       Accept: "application/json",
-      "x-api-key": process.env.MARVEL_RIVALS_API_KEY,
+      "x-api-key": API_KEY,
     },
   };
 
@@ -38,6 +48,16 @@ function fetchMatchHistory(player, limit = 5) {
 
         try {
           const json = JSON.parse(body);
+
+          // If API sends an error object, treat it as failure
+          if (json && json.error) {
+            return reject(
+              new Error(
+                `MarvelRivalsAPI error: ${json.message || "Unknown error"}`
+              )
+            );
+          }
+
           resolve(json);
         } catch (err) {
           reject(err);
@@ -114,10 +134,7 @@ module.exports = {
       const playerSide = mp.player_side;
       const winningSide = m.match_winner_side;
       let result = "Unknown result";
-      if (
-        typeof playerSide === "number" &&
-        typeof winningSide === "number"
-      ) {
+      if (typeof playerSide === "number" && typeof winningSide === "number") {
         result = winningSide === playerSide ? "WIN" : "LOSS";
       }
 
