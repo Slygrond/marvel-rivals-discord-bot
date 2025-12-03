@@ -1,12 +1,13 @@
 // src/utils/teamupReminder.js
 const https = require("node:https");
+const { EmbedBuilder } = require("discord.js");
 const { loadSettings } = require("./teamupSettings");
 
 const TEAMUP_API_KEY = process.env.TEAMUP_API_KEY;
 const TEAMUP_CALENDAR_ID = process.env.TEAMUP_CALENDAR_ID;
+const TEAMUP_PING_ROLE_ID = process.env.TEAMUP_PING_ROLE_ID; // role to ping (0-ONE)
+
 const POLL_SECONDS = Number(process.env.TEAMUP_DEFAULT_POLL_SECONDS) || 60;
-// optional role to ping (e.g. 0-ONE)
-const TEAMUP_PING_ROLE_ID = process.env.TEAMUP_PING_ROLE_ID || null;
 
 // Map friendly category names -> subcalendar IDs from .env
 const CATEGORY_TO_ID = {
@@ -33,11 +34,10 @@ function fetchTeamupEvents(startISO, endISO) {
       );
     }
 
-    const path = `/${encodeURIComponent(
-      TEAMUP_CALENDAR_ID
-    )}/events?startDate=${encodeURIComponent(startISO)}&endDate=${encodeURIComponent(endISO)}`;
-
-    console.log("[teamupReminder] Using path:", path);
+    // startDate / endDate are date-only, Teamup expects YYYY-MM-DD
+    const path = `/k/${TEAMUP_CALENDAR_ID}/events?startDate=${encodeURIComponent(
+      startISO
+    )}&endDate=${encodeURIComponent(endISO)}`;
 
     const options = {
       hostname: "api.teamup.com",
@@ -66,11 +66,7 @@ function fetchTeamupEvents(startISO, endISO) {
 
         try {
           const json = JSON.parse(body);
-          const events = json.events || [];
-          console.log(
-            `[teamupReminder] fetched ${events.length} events between ${startISO} and ${endISO}`
-          );
-          resolve(events);
+          resolve(json.events || []);
         } catch (err) {
           console.error("[teamupReminder] JSON parse error:", err, body);
           reject(err);
@@ -101,14 +97,7 @@ function startTeamupReminder(client) {
 
   setInterval(async () => {
     const settings = loadSettings();
-
-    // --- debug: show current tick settings ---
-    console.log("[teamupReminder] tick settings", {
-      enabled: settings.enabled,
-      category: settings.category,
-      leadMinutes: settings.leadMinutes,
-      channelId: settings.channelId,
-    });
+    console.log("[teamupReminder] tick settings", settings);
 
     if (!settings.enabled || !settings.channelId) {
       return;
@@ -118,10 +107,6 @@ function startTeamupReminder(client) {
       .fetch(settings.channelId)
       .catch(() => null);
     if (!channel) {
-      console.warn(
-        "[teamupReminder] Configured channel not found:",
-        settings.channelId
-      );
       return;
     }
 
@@ -129,8 +114,8 @@ function startTeamupReminder(client) {
     const leadMinutes = Number(settings.leadMinutes) || 15;
     const windowEnd = new Date(now.getTime() + leadMinutes * 60 * 1000);
 
-    const startISO = now.toISOString().slice(0, 10); // date only
-    const endISO = windowEnd.toISOString().slice(0, 10); // date only
+    const startISO = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const endISO = windowEnd.toISOString().slice(0, 10); // YYYY-MM-DD
 
     let events;
     try {
@@ -140,7 +125,6 @@ function startTeamupReminder(client) {
       return;
     }
 
-    // Filter by category if not "all"
     const chosenCategory = (settings.category || "matches").toLowerCase();
     let allowedSubcalendarId = null;
     if (chosenCategory !== "all") {
@@ -148,31 +132,22 @@ function startTeamupReminder(client) {
     }
 
     const upcoming = events.filter((ev) => {
-      // Only future events within leadMinutes
       const start = new Date(
         ev.start_dt || ev.start_dt_local || ev.start_dt_utc
       );
       if (isNaN(start.getTime())) return false;
-
       if (start <= now || start > windowEnd) return false;
 
-      // Category filter
       if (allowedSubcalendarId) {
         const subId = String(ev.subcalendar_id || "");
         if (subId !== String(allowedSubcalendarId)) return false;
       }
-
       return true;
     });
-
-    console.log(
-      `[teamupReminder] upcoming events to notify this tick: ${upcoming.length}`
-    );
 
     for (const ev of upcoming) {
       const id = ev.id || ev.event_id;
       if (!id || notifiedEventIds.has(id)) continue;
-
       notifiedEventIds.add(id);
 
       const start = new Date(
@@ -180,28 +155,52 @@ function startTeamupReminder(client) {
       );
       const startStr = isNaN(start.getTime())
         ? "Unknown time"
-        : start.toLocaleString("en-GB", { timeZone: "UTC" });
+        : start.toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
 
       const title = ev.title || "Untitled event";
-      const where = ev.location || ev.who || "No location specified";
-      const calName = ev.subcalendar_name || chosenCategory.toUpperCase();
+
+      // Try to figure out calendar name (LFS, Matches, etc.)
+      let calName =
+        ev.subcalendar_name ||
+        (ev.subcalendar && (ev.subcalendar.name || ev.subcalendar.title));
+      if (!calName) {
+        if (chosenCategory !== "all") calName = chosenCategory.toUpperCase();
+        else calName = "Event";
+      }
+
+      // Build optional "Where" line: only if we have something
+      const whereParts = [];
+      if (ev.location) whereParts.push(ev.location);
+      if (ev.who) whereParts.push(ev.who);
+      const where = whereParts.join(" – ");
 
       const lead = Math.round((start - now) / 60000);
 
-      // optional role ping
-      const rolePing = TEAMUP_PING_ROLE_ID
-        ? `<@&${TEAMUP_PING_ROLE_ID}> `
-        : "";
+      const embed = new EmbedBuilder()
+        .setTitle(`⏰ Upcoming ${calName}`)
+        .setDescription(`Starts in ~${lead} minutes`)
+        .addFields(
+          { name: "Title", value: title, inline: false },
+          { name: "When (UTC)", value: startStr, inline: false },
+          ...(where
+            ? [{ name: "Where", value: where, inline: false }]
+            : [])
+        )
+        .setColor(0xffc857)
+        .setTimestamp(start);
 
-      const msg =
-        `${rolePing}⏰ **Upcoming ${calName}** in ~${lead} minutes\n` +
-        `**Title:** ${title}\n` +
-        `**When (UTC):** ${startStr}\n` +
-        `**Where:** ${where}`;
+      const content = TEAMUP_PING_ROLE_ID
+        ? `<@&${TEAMUP_PING_ROLE_ID}>`
+        : undefined;
 
-      await channel.send(msg).catch((err) => {
-        console.error("[teamupReminder] Failed to send message:", err);
-      });
+      await channel
+        .send({
+          content,
+          embeds: [embed],
+        })
+        .catch((err) => {
+          console.error("[teamupReminder] Failed to send message:", err);
+        });
     }
   }, intervalMs);
 }
