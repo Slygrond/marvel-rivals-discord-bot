@@ -1,105 +1,147 @@
 // src/commands/mr-teamup.js
-const {
-  SlashCommandBuilder,
-  PermissionFlagsBits,
-  ChannelType,
-} = require("discord.js");
-const {
-  getGuildSettings,
-  setGuildSettings,
-} = require("../utils/teamupSettings");
+const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
+const { loadSettings, saveSettings } = require("../utils/teamupSettings");
 
-const reminderMinutes = Number(process.env.TEAMUP_REMINDER_MINUTES || "15");
+const CATEGORY_CHOICES = [
+  { name: "LFS", value: "lfs" },
+  { name: "Matches", value: "matches" },
+  { name: "Scrims", value: "scrims" },
+  { name: "Time Off", value: "timeoff" },
+  { name: "VODs", value: "vods" },
+  { name: "All calendars", value: "all" },
+];
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("mr-teamup")
-    .setDescription("Configure Teamup calendar reminders.")
-    .setDMPermission(false)
+    .setDescription("Configure Teamup calendar reminders")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand((sub) =>
       sub
-        .setName("set-channel")
-        .setDescription("Set the channel where reminders will be sent.")
+        .setName("channel")
+        .setDescription("Set the channel where reminders are sent")
         .addChannelOption((opt) =>
           opt
             .setName("channel")
-            .setDescription("Text channel for reminders")
-            .addChannelTypes(
-              ChannelType.GuildText,
-              ChannelType.GuildAnnouncement
-            )
+            .setDescription("Channel for reminders")
             .setRequired(true)
         )
     )
     .addSubcommand((sub) =>
-      sub.setName("enable").setDescription("Enable Teamup reminders.")
+      sub
+        .setName("toggle")
+        .setDescription("Enable or disable Teamup reminders")
+        .addBooleanOption((opt) =>
+          opt
+            .setName("enabled")
+            .setDescription("true = on, false = off")
+            .setRequired(true)
+        )
     )
     .addSubcommand((sub) =>
-      sub.setName("disable").setDescription("Disable Teamup reminders.")
+      sub
+        .setName("category")
+        .setDescription("Choose which type of calendar events to remind about")
+        .addStringOption((opt) =>
+          opt
+            .setName("type")
+            .setDescription("Event category")
+            .setRequired(true)
+            .addChoices(...CATEGORY_CHOICES)
+        )
     )
     .addSubcommand((sub) =>
-      sub.setName("status").setDescription("Show current Teamup reminder status.")
+      sub
+        .setName("lead")
+        .setDescription(
+          "Set how many minutes before an event the reminder triggers"
+        )
+        .addIntegerOption((opt) =>
+          opt
+            .setName("minutes")
+            .setDescription("Lead time in minutes (e.g., 5, 10, 15, 30)")
+            .setRequired(true)
+            .setMinValue(1)
+            .setMaxValue(240)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub.setName("status").setDescription("Show current Teamup reminder status")
     ),
 
   async execute(interaction) {
-    const guild = interaction.guild;
-    if (!guild) {
-      await interaction.reply({
-        content: "This command can only be used in a server.",
-        ephemeral: true,
-      });
+    const sub = interaction.options.getSubcommand();
+    let settings = loadSettings();
+
+    if (sub === "channel") {
+      const channel = interaction.options.getChannel("channel", true);
+      settings.channelId = channel.id;
+      saveSettings(settings);
+
+      await interaction.reply(
+        `✅ Reminders will be sent in ${channel} (id: \`${channel.id}\`).`
+      );
       return;
     }
 
-    const guildId = guild.id;
-    const sub = interaction.options.getSubcommand();
+    if (sub === "toggle") {
+      const enabled = interaction.options.getBoolean("enabled", true);
+      settings.enabled = enabled;
+      saveSettings(settings);
 
-    if (sub === "set-channel") {
-      const channel = interaction.options.getChannel("channel", true);
-
-      const settings = setGuildSettings(guildId, {
-        channelId: channel.id,
-      });
-
-      await interaction.reply({
-        content: `✅ Teamup reminders channel set to ${channel}.`,
-        ephemeral: true,
-      });
-    } else if (sub === "enable") {
-      const settings = setGuildSettings(guildId, {
-        enabled: true,
-      });
-
-      const where = settings.channelId
-        ? `<#${settings.channelId}>`
-        : "no channel set yet";
-
-      await interaction.reply({
-        content: `✅ Teamup reminders **enabled**. Current channel: ${where}.`,
-        ephemeral: true,
-      });
-    } else if (sub === "disable") {
-      setGuildSettings(guildId, { enabled: false });
-
-      await interaction.reply({
-        content: "⏹️ Teamup reminders **disabled** for this server.",
-        ephemeral: true,
-      });
-    } else if (sub === "status") {
-      const settings = getGuildSettings(guildId) || {};
-      const enabled = settings.enabled ? "ON ✅" : "OFF ⛔";
-      const channel =
-        settings.channelId ? `<#${settings.channelId}>` : "not set";
-
-      await interaction.reply({
-        content:
-          `📊 **Teamup status**\n` +
-          `• Reminders: ${enabled}\n` +
-          `• Channel: ${channel}\n` +
-          `• Lead time: ${reminderMinutes} minutes`,
-        ephemeral: true,
-      });
+      await interaction.reply(
+        `🔔 Teamup reminders are now **${enabled ? "ENABLED" : "DISABLED"}**.`
+      );
+      return;
     }
+
+    if (sub === "category") {
+      const type = interaction.options.getString("type", true);
+      settings.category = type;
+      saveSettings(settings);
+
+      const friendly =
+        CATEGORY_CHOICES.find((c) => c.value === type)?.name || type;
+
+      await interaction.reply(
+        `📅 Reminder category set to **${friendly}**.`
+      );
+      return;
+    }
+
+    if (sub === "lead") {
+      const minutes = interaction.options.getInteger("minutes", true);
+      settings.leadMinutes = minutes;
+      saveSettings(settings);
+
+      await interaction.reply(
+        `⏰ Lead time set to **${minutes} minutes** before events.`
+      );
+      return;
+    }
+
+    if (sub === "status") {
+      const channelText = settings.channelId
+        ? `<#${settings.channelId}> (\`${settings.channelId}\`)`
+        : "`not set`";
+
+      const friendlyCategory =
+        CATEGORY_CHOICES.find((c) => c.value === settings.category)?.name ||
+        settings.category ||
+        "Matches";
+
+      await interaction.reply(
+        [
+          "📊 **Teamup reminder status**",
+          `• Enabled: **${settings.enabled ? "Yes" : "No"}**`,
+          `• Channel: ${channelText}`,
+          `• Category: **${friendlyCategory}**`,
+          `• Lead time: **${settings.leadMinutes} minutes**`,
+        ].join("\n")
+      );
+      return;
+    }
+
+    await interaction.reply("Unknown subcommand.");
   },
 };

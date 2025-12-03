@@ -32,7 +32,7 @@ for (const file of commandFiles) {
 
 client.once(Events.ClientReady, (c) => {
   console.log(`✅ Logged in as ${c.user.tag}`);
-
+  startTeamupReminderLoop(client);
   // Set status: Playing with 0-ONE
   c.user.setPresence({
     activities: [
@@ -44,7 +44,6 @@ client.once(Events.ClientReady, (c) => {
     ],
     status: "online"
   });
-startTeamupReminderLoop(client);
 });
 
 // Handle slash commands

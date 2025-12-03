@@ -2,42 +2,48 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const SETTINGS_PATH = path.join(__dirname, "..", "..", "data", "teamupSettings.json");
+const SETTINGS_PATH = path.join(__dirname, "..", "..", "teamup-settings.json");
 
-function readAll() {
+const DEFAULT_SETTINGS = {
+  enabled: false,
+  channelId: null,
+  leadMinutes: Number(process.env.TEAMUP_DEFAULT_LEAD_MINUTES) || 15,
+  category: "matches", // one of: lfs, matches, scrims, timeoff, vods, all
+};
+
+function loadSettings() {
   try {
+    if (!fs.existsSync(SETTINGS_PATH)) {
+      return { ...DEFAULT_SETTINGS };
+    }
     const raw = fs.readFileSync(SETTINGS_PATH, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return {};
+    const parsed = JSON.parse(raw);
+
+    return {
+      ...DEFAULT_SETTINGS,
+      ...parsed,
+    };
+  } catch (err) {
+    console.error("[teamupSettings] Failed to load settings:", err);
+    return { ...DEFAULT_SETTINGS };
   }
 }
 
-function writeAll(all) {
-  fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true });
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(all, null, 2), "utf8");
-}
-
-function getGuildSettings(guildId) {
-  const all = readAll();
-  return all[guildId] || null;
-}
-
-function setGuildSettings(guildId, partial) {
-  const all = readAll();
-  const current = all[guildId] || {};
-  const updated = { ...current, ...partial };
-  all[guildId] = updated;
-  writeAll(all);
-  return updated;
-}
-
-function getAllGuildSettings() {
-  return readAll();
+function saveSettings(settings) {
+  try {
+    fs.writeFileSync(
+      SETTINGS_PATH,
+      JSON.stringify(settings, null, 2),
+      "utf8"
+    );
+  } catch (err) {
+    console.error("[teamupSettings] Failed to save settings:", err);
+  }
 }
 
 module.exports = {
-  getGuildSettings,
-  setGuildSettings,
-  getAllGuildSettings,
+  SETTINGS_PATH,
+  loadSettings,
+  saveSettings,
+  DEFAULT_SETTINGS,
 };
