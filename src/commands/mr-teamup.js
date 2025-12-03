@@ -9,6 +9,8 @@ const {
   setGuildSettings,
 } = require("../utils/teamupSettings");
 
+const reminderMinutes = Number(process.env.TEAMUP_REMINDER_MINUTES || "15");
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("mr-teamup")
@@ -91,7 +93,11 @@ module.exports = {
         settings.channelId ? `<#${settings.channelId}>` : "not set";
 
       await interaction.reply({
-        content: `📊 **Teamup status**\n• Reminders: ${enabled}\n• Channel: ${channel}\n• Lead time: ${reminderMinutes} minutes`,
+        content:
+          `📊 **Teamup status**\n` +
+          `• Reminders: ${enabled}\n` +
+          `• Channel: ${channel}\n` +
+          `• Lead time: ${reminderMinutes} minutes`,
         ephemeral: true,
       });
     }
