@@ -33,9 +33,11 @@ function fetchTeamupEvents(startISO, endISO) {
       );
     }
 
-    const path = `/k/${TEAMUP_CALENDAR_ID}/events?startDate=${encodeURIComponent(
-      startISO
-    )}&endDate=${encodeURIComponent(endISO)}`;
+    const path = `/${encodeURIComponent(
+      TEAMUP_CALENDAR_ID
+    )}/events?startDate=${encodeURIComponent(startISO)}&endDate=${encodeURIComponent(endISO)}`;
+
+    console.log("[teamupReminder] Using path:", path);
 
     const options = {
       hostname: "api.teamup.com",
