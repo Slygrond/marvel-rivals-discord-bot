@@ -1,4 +1,5 @@
 require("dotenv").config();
+const { startTeamupReminderLoop } = require("./utils/teamupReminder");
 const fs = require("node:fs");
 const path = require("node:path");
 const { Client, GatewayIntentBits, Collection, ActivityType, Events } = require("discord.js");
@@ -43,6 +44,7 @@ client.once(Events.ClientReady, (c) => {
     ],
     status: "online"
   });
+startTeamupReminderLoop(client);
 });
 
 // Handle slash commands
