@@ -1,5 +1,5 @@
 require("dotenv").config();
-const { startTeamupReminderLoop } = require("./utils/teamupReminder");
+const { startTeamupReminder } = require("./utils/teamupReminder");
 const fs = require("node:fs");
 const path = require("node:path");
 const { Client, GatewayIntentBits, Collection, ActivityType, Events } = require("discord.js");
@@ -32,7 +32,7 @@ for (const file of commandFiles) {
 
 client.once(Events.ClientReady, (c) => {
   console.log(`✅ Logged in as ${c.user.tag}`);
-  startTeamupReminderLoop(client);
+  startTeamupReminder(c);
   // Set status: Playing with 0-ONE
   c.user.setPresence({
     activities: [

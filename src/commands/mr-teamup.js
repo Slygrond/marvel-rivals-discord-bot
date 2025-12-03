@@ -1,5 +1,9 @@
 // src/commands/mr-teamup.js
-const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
+const {
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+  EmbedBuilder,
+} = require("discord.js");
 const { loadSettings, saveSettings } = require("../utils/teamupSettings");
 
 const CATEGORY_CHOICES = [
@@ -71,7 +75,7 @@ module.exports = {
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
-    let settings = loadSettings();
+    let settings = loadSettings() || {};
 
     if (sub === "channel") {
       const channel = interaction.options.getChannel("channel", true);
@@ -103,9 +107,7 @@ module.exports = {
       const friendly =
         CATEGORY_CHOICES.find((c) => c.value === type)?.name || type;
 
-      await interaction.reply(
-        `📅 Reminder category set to **${friendly}**.`
-      );
+      await interaction.reply(`📅 Reminder category set to **${friendly}**.`);
       return;
     }
 
@@ -121,6 +123,10 @@ module.exports = {
     }
 
     if (sub === "status") {
+      // fallbacks so we never get undefined / crash
+      const enabled = settings.enabled ?? false;
+      const leadMinutes = settings.leadMinutes ?? 15;
+
       const channelText = settings.channelId
         ? `<#${settings.channelId}> (\`${settings.channelId}\`)`
         : "`not set`";
@@ -130,15 +136,33 @@ module.exports = {
         settings.category ||
         "Matches";
 
-      await interaction.reply(
-        [
-          "📊 **Teamup reminder status**",
-          `• Enabled: **${settings.enabled ? "Yes" : "No"}**`,
-          `• Channel: ${channelText}`,
-          `• Category: **${friendlyCategory}**`,
-          `• Lead time: **${settings.leadMinutes} minutes**`,
-        ].join("\n")
-      );
+      const embed = new EmbedBuilder()
+        .setTitle("📊 Teamup reminder status")
+        .setColor(0x00ae86)
+        .addFields(
+          {
+            name: "Enabled",
+            value: enabled ? "✅ Yes" : "🚫 No",
+            inline: true,
+          },
+          {
+            name: "Channel",
+            value: channelText,
+            inline: true,
+          },
+          {
+            name: "Category",
+            value: friendlyCategory,
+            inline: true,
+          },
+          {
+            name: "Lead time",
+            value: `${leadMinutes} minutes`,
+            inline: true,
+          }
+        );
+
+      await interaction.reply({ embeds: [embed], ephemeral: true });
       return;
     }
 
